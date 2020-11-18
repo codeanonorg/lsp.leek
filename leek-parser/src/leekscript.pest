@@ -1,0 +1,34 @@
+Ident = { ASCII_ALPHA+}
+Number = { ASCII_DIGIT+}
+
+WHITESPACE = _{ "\t" | "\n" | " " }
+
+File = _{ Prog ~ EOI }
+
+Prog = { Stmt+ }
+
+Stmt = { Declr | Affect | IfElse | While | Defun | Return | (Expr ~ ";") }
+
+Declr = { "var" ~ Ident ~ "=" ~ Expr ~ ";" }
+
+Affect = { Ident ~ "=" ~ Expr ~ ";" }
+
+IfElse = { If ~ Else?}
+
+If = { "if" ~ "(" ~ Expr ~ ")" ~ "{" ~ Prog ~ "}" }
+
+While = { "while" ~ "(" ~ Expr ~ ")" ~ "{" ~ Prog ~ "}" }
+
+Else = { "else" ~ "{" ~ Prog ~ "}" }
+
+Args = { Ident ~ ("," ~ Ident)* }
+
+Params = { Expr ~ ("," ~ Expr)* }
+
+Defun = { "function" ~ Ident? ~ "(" ~ Args? ~ ")" ~ "{" ~ Prog ~ "}" }
+
+Call = { Ident ~ "(" ~ Params? ~ ")" }
+
+Return = { "return" ~ Expr ~ ";" }
+
+Expr = { Number | Call }
