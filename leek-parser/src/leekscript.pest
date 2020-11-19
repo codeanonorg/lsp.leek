@@ -5,9 +5,9 @@ WHITESPACE = _{ "\t" | "\n" | " " }
 
 File = _{ Prog ~ EOI }
 
-Prog = { Stmt+ }
+Prog = _{ Stmt+ }
 
-Stmt = { Declr | Affect | IfElse | While | Defun | Return | (Expr ~ ";") }
+Stmt = _{ Declr | Affect | IfElse | While | Defun | Return | (Expr ~ ";") }
 
 Declr = { "var" ~ Ident ~ "=" ~ Expr ~ ";" }
 

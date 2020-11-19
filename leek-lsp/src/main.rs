@@ -6,9 +6,9 @@ mod lsp;
 #[macro_use]
 extern crate jsonrpc_derive;
 
-use jsonrpc_core::{Result as RPCResult, IoHandler};
+use crate::lsp::{InitalizeParams, InitializeResult, ServerCapabilities, LSP};
+use jsonrpc_core::{IoHandler, Result as RPCResult};
 use jsonrpc_stdio_server::ServerBuilder;
-use crate::lsp::{LSP, InitalizeParams, InitializeResult, ServerCapabilities};
 use std::process::exit;
 
 #[derive(Copy, Clone, Default, Debug)]
@@ -19,7 +19,7 @@ impl LSP for LeekLSP {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 ..Default::default()
-            }
+            },
         })
     }
 
@@ -38,6 +38,5 @@ pub fn main() {
     let mut io = IoHandler::new();
     io.extend_with(LeekLSP.to_delegate());
 
-    ServerBuilder::new(io)
-        .build();
+    ServerBuilder::new(io).build();
 }
