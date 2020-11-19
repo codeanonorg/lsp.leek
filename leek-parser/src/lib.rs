@@ -1,76 +1,87 @@
-// TODO : add locations
+pub mod ast;
+use ast::StringLocated;
+use ast::EXPR;
+use ast::SPROG;
+use ast::STMT;
+use peg::str::LineCol;
+
 peg::parser! {
   grammar leek_prog() for str {
 
-    rule ws() = quiet!{ ("\t" / " " / "\n")* }
+    rule _() = quiet!{ ("\t" / " " / "\n")* }
 
     rule number() -> u32
-        = n:$(['0'..='9']+) { n.parse().unwrap() }
+        = n:$(['0'..='9']+)
+        { n.parse().unwrap() }
 
     rule ident() -> String
-        = s:$(['a'..='z' | 'A'..='Z']+) { s.to_owned() }
+        = s:$(['a'..='z' | 'A'..='Z']+)
+        { s.to_owned() }
 
     rule cst() -> EXPR
-        = n:number() { EXPR::Cst(n) }
+        = _ p:position!() n:number()
+        { unsafe { EXPR::Cst(p, n) } }
 
     rule var() -> EXPR
-        = i:ident() { EXPR::Var(i) }
+        = _ p:position!() i:ident()
+        { unsafe { EXPR::Var(p, i) } }
 
     rule ecall() -> EXPR
-        = i:ident() "(" l:expr() ** (ws() "," ws()) ")" { EXPR::ECall(i, l) }
+        = p:position!() i:ident() "(" l:expr() ** (_ "," _) ")"
+        { unsafe { EXPR::ECall(p, i, l) } }
 
     rule expr() -> EXPR
         = cst() / ecall() / var()
 
     rule affect() -> STMT
-        = i:ident() ws() "=" ws() e:expr() ws() ";" { STMT::Affect(i, e) }
+        = _ p:position!() i:ident() _ "=" _ e:expr() _ ";"
+        { unsafe { STMT::Affect(p, i, e) } }
 
     rule declr() -> STMT
-        = "var" ws() i:ident() ws() "=" ws() e:expr() ws() ";" { STMT::Declr(i, e) }
+        = _ p:position!() "var" _ i:ident() _ "=" _ e:expr() _ ";"
+        { unsafe { STMT::Declr(p, i, e) } }
 
     rule call() -> STMT
-        = i:ident() "(" ws() l:expr() ** (ws() "," ws()) ws() ")" { STMT::Call(i, l) }
+        = _ p:position!() i:ident() "(" _ l:expr() ** (_ "," _) _ ")"
+        { unsafe { STMT::Call(p, i, l) } }
 
     rule stmt() -> STMT
-        = ifElse() / (l:call() ";" { l })
+        = ifElse() / declr() / affect() / (l:call() ";" { l })
 
     rule Else() -> Vec<STMT>
-        = ws() "else" ws() "{" ws() l:stmt()+ ws() "}" { l }
+        = _ "else" _ "{" _ l:stmt()+ _ "}"
+        { l }
 
     rule ifElse() -> STMT
-        = ws() "if" ws() "(" c:expr() ")" ws() "{" ws() l:stmt()+  ws() "}" e:(Else())? { STMT::If(c, l, e) }
+        = _ p:position!() "if" _ "(" c:expr() ")" _ "{" _ l:stmt()+  _ "}" e:(Else())?
+        { unsafe { STMT::If(p, c, l, e) } }
 
     pub rule list() -> Vec<EXPR>
-        = "[" ws() l:expr() ** (ws() "," ws()) "]" { l }
+        = "[" _ l:expr() ** (_ "," _) "]"
+        { l }
 
     pub rule prog() -> Vec<STMT>
-        = ws() l:stmt() ** (ws()) { l }
+        = _ l:stmt() ** _
+        { l }
   }
-}
-
-#[derive(Debug)]
-pub enum EXPR {
-    Cst(u32),
-    Var(String),
-    ECall(String, Vec<EXPR>),
-}
-
-// TODO : add locations
-#[derive(Debug)]
-pub enum STMT {
-    Declr(String, EXPR),
-    Affect(String, EXPR),
-    If(EXPR, Vec<STMT>, Option<Vec<STMT>>),
-    While(EXPR, Vec<STMT>, Vec<STMT>),
-    Defun(String, Vec<Box<str>>, Vec<STMT>),
-    Call(String, Vec<EXPR>),
-    Return(EXPR),
 }
 
 #[test]
 fn test_main() {
-    println!(
-        "{:?}",
-        leek_prog::prog("if (1) { print(a); } else { print(b); }")
-    );
+    let inp = "var a = 3;\nvar b = 3;\nif (a) { print(a); }";
+    let res: Result<Vec<STMT>, _> = leek_prog::prog(inp);
+    match res {
+        Ok(ast) => {
+            for s in ast.iter() {
+                println!(
+                    "{}",
+                    SPROG {
+                        text: String::from(inp),
+                        s: s
+                    }
+                )
+            }
+        }
+        Err(err) => println!("{:?}", err),
+    }
 }
