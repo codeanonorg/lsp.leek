@@ -1,9 +1,5 @@
 pub mod ast;
-use ast::StringLocated;
-use ast::EXPR;
-use ast::SPROG;
-use ast::STMT;
-use peg::str::LineCol;
+use ast::*;
 
 peg::parser! {
   grammar leek_prog() for str {
@@ -73,13 +69,7 @@ fn test_main() {
     match res {
         Ok(ast) => {
             for s in ast.iter() {
-                println!(
-                    "{}",
-                    SPROG {
-                        text: String::from(inp),
-                        s: s
-                    }
-                )
+                println!("{}", SPROG::new(String::from(inp), s))
             }
         }
         Err(err) => println!("{:?}", err),

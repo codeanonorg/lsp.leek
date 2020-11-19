@@ -40,8 +40,14 @@ impl StringLocated for STMT {
 }
 
 pub struct SPROG<'a> {
-    pub text: String,
-    pub s: &'a STMT,
+    text: String,
+    s: &'a STMT,
+}
+
+impl<'a> SPROG<'a> {
+    pub fn new(text: String, s: &'a STMT) -> SPROG {
+        SPROG { text, s }
+    }
 }
 
 impl<'a> Display for SPROG<'a> {
