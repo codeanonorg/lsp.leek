@@ -48,6 +48,14 @@ impl TextDocument {
         self.get(self.lookup_offset(range.start)?..self.lookup_offset(range.end)?)
     }
 
+    pub fn last_char_pos(&self) -> Position {
+        let (line, len) = self.lines.last().cloned().unwrap_or((0, 0));
+        Position {
+            line: line as u64,
+            character: len as u64,
+        }
+    }
+
     pub fn get<R: SliceIndex<str>>(&self, range: R) -> Option<&R::Output> {
         self.data.get(range)
     }

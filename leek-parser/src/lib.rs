@@ -1,15 +1,17 @@
 use std::ops::Range;
-// TODO : add locations
+
 peg::parser! {
   grammar leek_prog() for str {
 
-    rule ws() = quiet!{ ("\t" / " " / "\n")* }
+    rule ws() = quiet!{ "//" (!"\n" [_])* / "/*" (!"*/" [_]) / ("\t" / " " / "\n")* }
 
-    rule number() -> u32
-        = n:$(['0'..='9']+) { n.parse().unwrap() }
+    rule number() -> u32 = quiet! {
+            n:$(['0'..='9']+) { n.parse().unwrap() }
+        } / expected!("number")
 
-    rule ident() -> String
-        = s:$(['a'..='z' | 'A'..='Z']+) { s.to_owned() }
+    rule ident() -> String = quiet!{
+            s:$(['a'..='z' | 'A'..='Z']+) { s.to_owned() }
+        } / expected!("identifier")
 
     rule cst() -> EXPR
         = s:position!() ws() n:number() e:position!() { EXPR::Cst(s..e, n) }
@@ -20,8 +22,12 @@ peg::parser! {
     rule ecall() -> EXPR
         = s:position!() i:ident() ws() "(" l:expr() ** (ws() ",") ws() ")" e:position!() { EXPR::ECall(s..e, i, l) }
 
-    rule expr() -> EXPR
-        = cst() / ecall() / var()
+    rule list() -> EXPR
+        = s:position!() "[" ws() l:expr() ** (ws() "," ws()) "]" e:position!() { EXPR::List(s..e, l) }
+
+    rule expr() -> EXPR = quiet!{
+            list() / cst() / ecall() / var()
+        } / expected!("expression")
 
     rule affect() -> STMT
         = ws() s:position!() i:ident() ws() "=" ws() e:expr() ws() ";" end:position!() { STMT::Affect(s..end, i, e) }
@@ -32,20 +38,29 @@ peg::parser! {
     rule call() -> STMT
         = ws() s:position!() i:ident() "(" ws() l:expr() ** (ws() "," ws()) ws() ")" e:position!() { STMT::Call(s..e, i, l) }
 
+    rule while_() -> STMT
+        = ws() s:position!() "while" ws() "(" e:expr() ws() ")" b:block() end:position!() { STMT::While(s..end, e, b) }
+
+    rule block() -> Vec<STMT>
+        = ws() "{" p:stmts() ws() "}" { p }
+        / s:stmt() { vec![s] }
+        / expected!("block")
+
     rule stmt() -> STMT
-        = ifElse() / (l:call() ";" { l })
+        = declr() / while_() / ifElse() / (l:call() ";" { l }) / expected!("statement")
 
     rule Else() -> Vec<STMT>
-        = ws() "else" ws() "{" ws() l:stmt()+ ws() "}" { l }
+        = ws() "else" ws() l:block() { l }
 
     rule ifElse() -> STMT
-        = ws() s:position!() "if" ws() "(" c:expr() ")" ws() "{" ws() l:stmt()+  ws() "}" e:(Else())? end:position!() { STMT::If(s..end, c, l, e) }
+        = ws() s:position!() "if" ws() "(" c:expr() ")" ws() l:block() e:(Else())? end:position!() { STMT::If(s..end, c, l, e) }
 
-    pub rule list() -> EXPR
-        = s:position!() "[" ws() l:expr() ** (ws() "," ws()) "]" e:position!() { EXPR::List(s..e, l) }
-
-    pub rule prog() -> Vec<STMT>
+    rule stmts() -> Vec<STMT>
         = ws() l:stmt() ** (ws()) { l }
+
+    rule eof() = quiet!{ ![_] }
+
+    pub rule prog() -> Vec<STMT> = s:stmts() eof() { s }
   }
 }
 

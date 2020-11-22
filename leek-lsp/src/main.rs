@@ -1,14 +1,18 @@
-use crate::vfs::Vfs;
-use itertools::Itertools;
-use leek_parser::STMT;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::sync::Arc;
+
+use itertools::Itertools;
 use tokio::macros::support::Future;
 use tokio::sync::{Mutex, RwLock};
+use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tower_lsp::jsonrpc::Result as RPCResult;
 use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+
+use leek_parser::STMT;
+
+use crate::doc::TextDocument;
+use crate::vfs::Vfs;
 
 mod doc;
 mod vfs;
@@ -24,7 +28,7 @@ impl LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> RPCResult<InitializeResult> {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::Incremental)),
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::Full)),
                 ..Default::default()
             },
             ..Default::default()
@@ -41,6 +45,12 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let mut vfs = self.vfs.write().await;
+        let doc = vfs.open_uri(&params.text_document.uri).await;
+        self.client.publish_diagnostics(params.text_document.uri, self.get_diagnostics(doc), Some(params.text_document.version)).await;
+    }
+
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let mut vfs = self.vfs.write().await;
         for change in params.content_changes {
@@ -48,46 +58,10 @@ impl LanguageServer for Backend {
         }
 
         let doc = vfs.open_uri(&params.text_document.uri).await;
-        let ast = leek_parser::parse(doc);
-        let diags = match ast {
-            Ok(ast) => ast
-                .iter()
-                .flat_map(|s| get_variables(s).into_iter())
-                .map(|(span, v)| Diagnostic {
-                    source: Some("leekscript".to_string()),
-                    message: format!("Found variable '{}'", v),
-                    range: Range {
-                        start: doc.lookup_pos(span.start).unwrap(),
-                        end: doc.lookup_pos(span.end).unwrap(),
-                    },
-                    severity: Some(DiagnosticSeverity::Information),
-                    ..Default::default()
-                })
-                .collect(),
-            Err(err) => {
-                let pos = doc.lookup_pos(err.location.offset).unwrap();
-                vec![Diagnostic {
-                    source: Some("leekscript".to_string()),
-                    message: err.to_string(),
-                    range: Range {
-                        start: pos,
-                        end: pos,
-                    },
-                    severity: Some(DiagnosticSeverity::Error),
-                    ..Default::default()
-                }]
-            }
-        };
-
-        self.client
-            .publish_diagnostics(
-                params.text_document.uri,
-                diags,
-                params.text_document.version,
-            )
-            .await;
+        self.client.publish_diagnostics(params.text_document.uri, self.get_diagnostics(doc), params.text_document.version).await;
     }
 }
+
 
 fn get_variables(stmt: &STMT) -> Vec<(std::ops::Range<usize>, Cow<str>)> {
     match stmt {
@@ -126,4 +100,39 @@ async fn main() {
         .interleave(messages)
         .serve(service)
         .await;
+}
+
+impl Backend {
+    fn get_diagnostics(&self, doc: &TextDocument) -> Vec<Diagnostic> {
+        let ast = leek_parser::parse(doc);
+        match ast {
+            Ok(ast) => ast
+                .iter()
+                .flat_map(|s| get_variables(s).into_iter())
+                .map(|(span, v)| Diagnostic {
+                    source: Some("leekscript".to_string()),
+                    message: format!("Found variable '{}'", v),
+                    range: Range {
+                        start: doc.lookup_pos(span.start).unwrap_or(Position::default()),
+                        end: doc.lookup_pos(span.end).unwrap_or(doc.last_char_pos()),
+                    },
+                    severity: Some(DiagnosticSeverity::Information),
+                    ..Default::default()
+                })
+                .collect(),
+            Err(err) => {
+                let pos = doc.lookup_pos(err.location.offset).unwrap_or(doc.last_char_pos());
+                vec![Diagnostic {
+                    source: Some("leekscript".to_string()),
+                    message: err.to_string(),
+                    range: Range {
+                        start: pos,
+                        end: pos,
+                    },
+                    severity: Some(DiagnosticSeverity::Error),
+                    ..Default::default()
+                }]
+            }
+        }
+    }
 }
