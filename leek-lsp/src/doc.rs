@@ -1,8 +1,10 @@
-
-use tower_lsp::lsp_types::*;
 use std::ops::{Deref, Index, RangeBounds};
-use tower_lsp::lsp_types::Range as LSPRange;
 use std::slice::SliceIndex;
+
+use tower_lsp::lsp_types::Range as LSPRange;
+use tower_lsp::lsp_types::*;
+
+use leek_parser::STMT;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TextDocument {
@@ -31,7 +33,10 @@ impl Deref for TextDocument {
     }
 }
 
-impl<R> Index<R> for TextDocument where String: Index<R> {
+impl<R> Index<R> for TextDocument
+where
+    String: Index<R>,
+{
     type Output = <String as Index<R>>::Output;
 
     fn index(&self, index: R) -> &Self::Output {
@@ -49,10 +54,10 @@ impl TextDocument {
     }
 
     pub fn last_char_pos(&self) -> Position {
-        let (line, len) = self.lines.last().cloned().unwrap_or((0, 0));
+        let (line, len) = self.lines.last().cloned().unwrap_or((0, 1));
         Position {
             line: line as u64,
-            character: len as u64,
+            character: if len == 0 { 0 } else { len as u64 - 1 },
         }
     }
 
@@ -86,7 +91,12 @@ impl TextDocument {
         if let Some(range) = change.range {
             let start = self.lookup_offset(range.start)?;
             let end = self.lookup_offset(range.end)?;
-            self.data = format!("{}{}{}", &self.data[..start], change.text, &self.data[end+1..]);
+            self.data = format!(
+                "{}{}{}",
+                &self.data[..start],
+                change.text,
+                &self.data[end + 1..]
+            );
             self.lines = Self::make_line_offsets(&self.data);
         } else {
             *self = Self::from(change.text);
@@ -110,6 +120,88 @@ impl TextDocument {
                 } else {
                     len += 1;
                     None
+                }
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug)]
+pub struct Document {
+    pub doc: TextDocument,
+    pub ast: crate::error::Result<Vec<STMT>>,
+    pub symbols: Vec<DocumentSymbol>,
+}
+
+impl PartialEq<Self> for Document {
+    fn eq(&self, other: &Document) -> bool {
+        self.doc == other.doc
+    }
+}
+impl Eq for Document {}
+
+impl PartialEq<TextDocument> for Document {
+    fn eq(&self, other: &TextDocument) -> bool {
+        &self.doc == other
+    }
+}
+
+impl From<String> for Document {
+    fn from(data: String) -> Self {
+        let ast = Document::parse(&data);
+        let doc = TextDocument::from(data);
+        let symbols = if let Ok(ast) = ast.as_ref() {
+            Document::make_symbols(&doc, ast)
+        } else {
+            vec![]
+        };
+        Self { doc, ast, symbols }
+    }
+}
+
+impl Document {
+    pub fn update(&mut self, change: TextDocumentContentChangeEvent) {
+        self.doc.update(change);
+        self.ast = Self::parse(&self.doc);
+        self.symbols = if let Ok(ast) = self.ast.as_ref() {
+            Self::make_symbols(&self.doc, ast)
+        } else {
+            vec![]
+        };
+    }
+}
+
+impl Document {
+    fn parse(data: &str) -> crate::error::Result<Vec<STMT>> {
+        leek_parser::parse(data).map_err(|err| {
+            crate::error::Error::ParseError(
+                Position {
+                    line: err.location.line as u64,
+                    character: err.location.column as u64,
+                },
+                err.to_string(),
+            )
+        })
+    }
+}
+
+impl Document {
+    fn make_symbols(doc: &TextDocument, ast: &[STMT]) -> Vec<DocumentSymbol> {
+        ast.iter()
+            .flat_map(|s| s.get_declarations().into_iter())
+            .map(|(r, i)| {
+                let range = Range {
+                    start: doc.lookup_pos(r.start).unwrap_or(Default::default()),
+                    end: doc.lookup_pos(r.end).unwrap_or(doc.last_char_pos()),
+                };
+                DocumentSymbol {
+                    kind: SymbolKind::Variable,
+                    deprecated: None,
+                    range,
+                    name: i.to_string(),
+                    children: None,
+                    detail: None,
+                    selection_range: range,
                 }
             })
             .collect()
